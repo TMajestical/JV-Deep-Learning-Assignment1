@@ -12,3 +12,4 @@ The Vision:
 The Approach:
 
     Each of the above components would be implemented in an incremental fashion. The python notebook file "JV CS23M036 ASSIGNMENT1.ipynb" would by and large me used to incrementally build the code and unit test it. Once a functionality is built, it would be added to the main code base.
+
