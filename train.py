@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from tqdm.notebook import tqdm
 import gc
 import time
+import wandb
 
 class Initializer:
     """
@@ -179,62 +180,71 @@ class Activation:
         """
 
         return np.exp(x)/np.sum(np.exp(x))
-    
-    def grad_activation(self,activation="relu"):
+
+class Activation_Gradient:
+
+    """
+    Class to provide a method which evaluates the gradient of the activation used at a point x in the space.
+
+    To avoid the use of autograd/diff packages, the closed form of the derivatives is computed before hand and plugged in here.
+
+    Such an approach is taken to build and train a neural network from scratch, instead of depending on existing libraries.
+
+    This new activation functions can easily be added by creating a method that evaluates the closed form of the derivative at any given point x.
+    and an appropriate elif condition must be added.
+    """
+
+    def grad_relu(self,x):
+
+        x[x<=0] = 0
+        x[x>0] = 1
+
+        return x
+
+    def grad_tanh(self,x):
+
+        return 1-(np.tanh(x))**2
+
+    def grad_sigmoid(self,x):
+
+        logistic =  1/(1+np.exp(-x))
+
+        return logistic*(1-logistic)
+
+    def grad_identity(self,x):
+
+        return np.ones(x.shape)
+
+
+    def grad_activation(self,x,activation="relu"):
 
         """
-        Method to return a method which evaluates the gradient of the activation used at a point x in the space.
-
-        To avoid the use of autograd/diff packages, the closed form of the derivatives is computed before hand and plugged in here.
-
-        Such an approach is taken to build and train a neural network from scratch, instead of depending on existing libraries.
-
-        This new activation functions can easily be added by creating a method that evaluates the closed form of the derivative at any given point x.
-        and an appropriate elif condition must be added.
-
         params:
-
+    
             activation : currently supported : "relu" [Default] ,"tanh",sigmoid".
-
+    
         returns:
-
+    
             An invokable method that produces deriviative of the activation function evaluated at x.
         
         """
 
-        def grad_relu(x):
-
-            x[x<=0] = 0
-            x[x>0] = 1
-
-            return x
-
-        def grad_tanh(x):
-
-            return 1-(np.tanh(x))**2
-
-        def grad_sigmoid(x):
-
-            logistic =  1/(1+np.exp(-x))
-
-            return logistic*(1-logistic)
-
-        def grad_identity(x):
-
-            return np.ones(x.shape)
-
         if activation=="relu":
-            return grad_relu
-
-        elif activation=="tanh":
-            return grad_tanh
-
-        elif activation=="sigmoid":
-            return grad_sigmoid
-
-        elif activation=="identity":
-            return grad_identity
+            return self.grad_relu(x)
     
+        elif activation=="tanh":
+            return self.grad_tanh(x)
+    
+        elif activation=="sigmoid":
+            return self.grad_sigmoid(x)
+    
+        elif activation=="identity":
+            return self.grad_identity(x)
+
+        
+    
+    
+
 class NeuralNetwork:
     """
         A class containing methods to create a neural network, perform forward pass (prediction) and backpropogation/training
@@ -440,7 +450,7 @@ class NeuralNetwork:
             weights = self.weights
             biases = self.biases
 
-        activation_grad = Activation.grad_activation(self.activation.__name__)
+        activation_grad = Activation_Gradient()
 
         dw_list = [] ## list of gradients of weights from last layer to 1st layer
 
@@ -464,11 +474,12 @@ class NeuralNetwork:
 
                 grad_h_prev = weights[i].T @ grad_ai ## gradient of loss w.r.t activation of previous layer
     
-                grad_a_prev = grad_h_prev * activation_grad(a[i-1]) ##gradient of loss wrt pre-activation of previous layer
+                grad_a_prev = grad_h_prev * activation_grad.grad_activation(a[i-1],self.activation.__name__) ##gradient of loss wrt pre-activation of previous layer
     
                 grad_ai = grad_a_prev
 
         return dw_list, db_list
+
 
 class Optimiser:
 
@@ -1182,31 +1193,30 @@ class Optimiser:
 
             None.
         
-        
         """
         
         if optimiser == "sgd":
 
-            self.sgd(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,log_wandb_data)
+            self.sgd(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,log_wandb_data=log_wandb_data)
 
         elif optimiser == "gd_momentum":
 
-            self.gd_momentum(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,log_wandb_data)
+            self.gd_momentum(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,momentum=0.9,log_wandb_data=log_wandb_data)
         
         elif optimiser == "gd_nesterov":
 
-            self.gd_nesterov(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,log_wandb_data)
+            self.gd_nesterov(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,momentum=0.9,log_wandb_data=log_wandb_data)
             
         elif optimiser == "rmsprop":
 
-            self.rmsprop(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,log_wandb_data)
+            self.rmsprop(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,beta=0.5,epsilon=1e-4,log_wandb_data=log_wandb_data)
             
         elif optimiser == "adam":
 
-            self.adam(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,log_wandb_data)
+            self.adam(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,beta1=0.9,beta2=0.999,epsilon=1e-8,log_wandb_data=log_wandb_data)
         
         elif optimiser == "nadam":
 
-            self.nadam(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,log_wandb_data)
+            self.nadam(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,beta1=0.9,beta2=0.999,epsilon=1e-8,log_wandb_data=log_wandb_data)
             
 
