@@ -1,65 +1,70 @@
 #JV
 
-from train import *
+from train import Initializer,Activation,Activation_Gradient,NeuralNetwork,Optimiser
+from keras.datasets import fashion_mnist,mnist
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 import wandb
+from sklearn.metrics import confusion_matrix
 
 #"""WandB API Key Masked"""
-wandb.login(key="")
+wandb.login(key="38853ce9d1432bd40bf80d2d27657183fc335aeb")
 
 # Creating a wandb sweep config
 
 optim = Optimiser
 
 sweep_config = {
-    'method': 'bayes',
-    'name' : 'sweep cross entropy',
+    'method': 'grid',
+    'name' : 'sweep cross entropy and MSE',
     'metric': {
       'name': 'val_accuracy',
       'goal': 'maximize'
     },
     'parameters': {
         'number_of_hidden_layers': {
-            'values': [3,4]
+            'values': [4,5]
         },    
          'hidden_size':{
-            'values':[32,64,128]
+            'values':[64]
         },
         'activation': {
-            'values': ['tanh','relu','sigmoid']
+            'values': ['tanh']
         },
         
         'initialization': {
-            'values': ["random","xavier"]
+            'values': ["xavier"]
 
         },
         'optimiser': {
-            'values': ["gd_nesterov","rmsprop","nadam"]
+            'values': ["nadam"]
         },
         
         'epochs': {
-            'values': [10,15]
+            'values': [25]
         },
 
         'batch_sizes': {
-            'values': [16,32]
+            'values': [32,64]
         },
         
         'lr': {
             'values': [1e-4]
         },
         'weight_decay': {
-            'values': [0.0005, 0.5]
+            'values': [0.5]
         },
         'loss': {
-            'values': ['cross entropy']
+            'values': ['cross_entropy','mean_squared_error']
         },
 
 
     }
 }
 
-sweep_id = wandb.sweep(sweep=sweep_config, project='JV_Smart_Bayes_Run')
-
+#sweep_id = wandb.sweep(sweep=sweep_config, project='JV_CS23M036_TEJASVI_DL_ASSIGNMENT1')
+sweep_id = wandb.sweep(sweep=sweep_config, project='tmp')
 
 
 ## Data Split and Normalisation
@@ -90,7 +95,7 @@ y_train_data = y_train[train_indices]
 x_validation_data = x_train_flattened[validation_indices]
 y_validation_data = y_train[validation_indices]
 
-
+optimiser_params_dict = {"momentum":0.9,"beta":0.5,"beta1":0.9,"beta2":0.999,"epsilon":1e-8}
 
 def create_nnet_and_train(config):
     ##create a neural network.
@@ -129,8 +134,9 @@ def create_nnet_and_train(config):
     print_val_accuracy = True
 
     log_wandb_data = True
-    
-    optim.train(nn,train_data,val_data,optimiser_algo,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,log_wandb_data)
+
+
+    optim.train(nn,train_data,val_data,optimiser_algo,optimiser_params_dict,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,log_wandb_data)
 
 def main():
     '''
@@ -152,5 +158,5 @@ def main():
         create_nnet_and_train(wandb.config)
         
 
-wandb.agent(sweep_id, function=main,count=200) # calls main function for count number of times.
+wandb.agent(sweep_id, function=main,count=100) # calls main function for count number of times.
 wandb.finish()
