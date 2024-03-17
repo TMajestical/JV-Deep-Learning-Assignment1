@@ -16,18 +16,18 @@ wandb.login(key="")
 optim = Optimiser
 
 sweep_config = {
-    'method': 'grid',
-    'name' : 'sweep cross entropy and MSE',
+    'method': 'bayes',
+    'name' : 'sweep MNIST',
     'metric': {
       'name': 'val_accuracy',
       'goal': 'maximize'
     },
     'parameters': {
         'number_of_hidden_layers': {
-            'values': [4,5]
+            'values': [3,4,5]
         },    
          'hidden_size':{
-            'values':[64]
+            'values':[32,64,128]
         },
         'activation': {
             'values': ['tanh']
@@ -42,7 +42,7 @@ sweep_config = {
         },
         
         'epochs': {
-            'values': [25]
+            'values': [10,15,25]
         },
 
         'batch_sizes': {
@@ -50,20 +50,21 @@ sweep_config = {
         },
         
         'lr': {
-            'values': [1e-4]
+            'values': [1e-3,1e-4]
         },
         'weight_decay': {
-            'values': [0.5]
+            'values': [0,0.005,0.5]
         },
         'loss': {
-            'values': ['cross_entropy','mean_squared_error']
+            'values': ['cross_entropy']
         },
 
 
     }
 }
 
-sweep_id = wandb.sweep(sweep=sweep_config, project='JV_CS23M036_TEJASVI_DL_ASSIGNMENT1')
+#sweep_id = wandb.sweep(sweep=sweep_config, project='JV_CS23M036_TEJASVI_DL_ASSIGNMENT1')
+sweep_id = wandb.sweep(sweep=sweep_config, project='MNIST_trials')
 
 
 ## Data Split and Normalisation
@@ -72,7 +73,7 @@ sweep_id = wandb.sweep(sweep=sweep_config, project='JV_CS23M036_TEJASVI_DL_ASSIG
 ## now this data is being flattened, i.e each image into a 1d array
 ## then flattened train data is split into 80% train and 20% validation data.
 
-(x_train,y_train),(x_test,y_test) = fashion_mnist.load_data()
+(x_train,y_train),(x_test,y_test) = mnist.load_data()
 
 
 seed = 76 #setting this as seed wherever randomness comes
@@ -157,5 +158,5 @@ def main():
         create_nnet_and_train(wandb.config)
         
 
-wandb.agent(sweep_id, function=main,count=100) # calls main function for count number of times.
+wandb.agent(sweep_id, function=main,count=25) # calls main function for count number of times.
 wandb.finish()
