@@ -2,14 +2,14 @@
 
 ## CS23M036, MALLADI TEJASVI
 
-from keras.datasets import fashion_mnist
+from keras.datasets import fashion_mnist,mnist
 import numpy as np
 import matplotlib.pyplot as plt
-#from tqdm import tqdm_gui,tqdm
-from tqdm.notebook import tqdm
-import gc
-import time
+from tqdm import tqdm
 import wandb
+from sklearn.metrics import confusion_matrix
+import networkx as nx
+import argparse
 
 class Initializer:
     """
@@ -138,7 +138,7 @@ class Activation:
         return np.tanh(x)
 
 
-    def relu(self,x):
+    def ReLu(self,x):
         """
         A method to immplement ReLu activation.
 
@@ -194,7 +194,7 @@ class Activation_Gradient:
     and an appropriate elif condition must be added.
     """
 
-    def grad_relu(self,x):
+    def grad_ReLu(self,x):
 
         x[x<=0] = 0
         x[x>0] = 1
@@ -216,12 +216,12 @@ class Activation_Gradient:
         return np.ones(x.shape)
 
 
-    def grad_activation(self,x,activation="relu"):
+    def grad_activation(self,x,activation="ReLu"):
 
         """
         params:
     
-            activation : currently supported : "relu" [Default] ,"tanh",sigmoid".
+            activation : currently supported : "ReLu" [Default] ,"tanh",sigmoid".
     
         returns:
     
@@ -229,8 +229,8 @@ class Activation_Gradient:
         
         """
 
-        if activation=="relu":
-            return self.grad_relu(x)
+        if activation=="ReLu":
+            return self.grad_ReLu(x)
     
         elif activation=="tanh":
             return self.grad_tanh(x)
@@ -241,9 +241,6 @@ class Activation_Gradient:
         elif activation=="identity":
             return self.grad_identity(x)
 
-        
-    
-    
 
 class NeuralNetwork:
     """
@@ -275,7 +272,7 @@ class NeuralNetwork:
             
             initialization (default="random"): Parameter initialization process : "random normal" or "xavier normal"
             
-            activation (default="sigmoid"): Activation function for all the hidden layers ("sigmoid","relu","tanh","identity")
+            activation (default="sigmoid"): Activation function for all the hidden layers ("sigmoid","ReLu","tanh","identity")
             
             output_activation (default="softmax"): Activation function for the output layer ("softmax","linear")
 
@@ -367,9 +364,9 @@ class NeuralNetwork:
                 
             self.activation = activation_obj.tanh
 
-        elif activation == "relu":
+        elif activation == "ReLu":
                 
-            self.activation = activation_obj.relu
+            self.activation = activation_obj.ReLu
 
         elif activation == "identity":
 
@@ -426,7 +423,7 @@ class NeuralNetwork:
                 
         return a,h,output
 
-    def backprop(self,a,h,y_true,y_pred,weights="default",biases="default"):
+    def backprop(self,a,h,y_true,y_pred,weights="default",biases="default",loss="cross entropy"):
 
 
         """
@@ -439,14 +436,21 @@ class NeuralNetwork:
             y_pred : The predicted class distribution for the same input.
             weights : By default they are the network's weights, but to support nestorov based optimisers, where a look ahead based gradient is computed, this parameter support would be required.
             biases : By default they are the network's biases, but to support nestorov based optimisers, where a look ahead based gradient is computed, this parameter support would be required.
+            loss : The loss function used, default is cross entropy. Accordingly the gradient computation would change. Default : "cross entropy"
 
+            Note:
+
+                 Squared error loss is assumed to be computed on the outputs of softmax, which are probabilities of each class.
+                 This is restrictive in the sense that this network may not work for a regression problem, but still such an 
+                 assumption is made to meet the requirements of what's asked in the assignment.
+            
         Returns:
 
             The list of layer wise gradients.
         
         """
 
-        if type(weights) == str:
+        if type(weights) == str:  ## which means that weights and biases are "default", then set them to the network's weights.
             weights = self.weights
             biases = self.biases
 
@@ -455,8 +459,13 @@ class NeuralNetwork:
         dw_list = [] ## list of gradients of weights from last layer to 1st layer
 
         db_list = [] ## list of gradients of biases from last layer to 1st layer
+
         
-        grad_aL = -(y_true-y_pred)  ## gradient of loss w.r.t pre-activation of output layer
+        if loss == "cross entropy":
+            grad_aL = -(y_true-y_pred)  ## gradient of loss w.r.t pre-activation of output layer
+
+        elif loss == "squared error":
+            grad_aL = 2*(y_pred-y_true)*y_pred*(1-y_pred) ## derived this closed form expression by hand.
 
         grad_ai = grad_aL
 
@@ -481,6 +490,7 @@ class NeuralNetwork:
         return dw_list, db_list
 
 
+
 class Optimiser:
 
     """
@@ -494,7 +504,7 @@ class Optimiser:
         nadam (nadam)
     """
 
-    def compute_accuracy(self,nn,data,return_stats=False,loss_type="cross entropy",print_stats=True,type_of_data="Validation",epoch=0,log_wandb_data=False):
+    def compute_accuracy(self,nn,data,return_stats=False,loss_type="cross entropy",print_stats=True,type_of_data="Validation",epoch=0,log_wandb_data=False,return_confusion_matrix=False):
 
         """
         A helping method for the optimiser methods. It takes the current neural network object and data, and returns the accuracy and loss over the data.
@@ -521,11 +531,19 @@ class Optimiser:
         for i in range(x_data.shape[0]):
     
             _,_,prediction_probs = nn.forward(x_data[i])
-            list_of_predicted_classes.append(np.argmax(prediction_probs))
+            list_of_predicted_classes.append(np.argmax(prediction_probs)) ## computing predicted class would be the same irrespective of the loss function
 
 
             if loss_type == "cross entropy":
                 loss += -np.log(prediction_probs[y_data[i]]) ##cross entropy loss
+
+            elif loss_type == "squared error":
+
+                ## making a one-hot encoding of the true class; this can also be seen as the true prob. distribution.
+                y_true = np.zeros((nn.output_neurons))
+                y_true[y_data[i]]  = 1
+                
+                loss += np.sum(np.square(prediction_probs-y_true))
 
     
         unique,counts = np.unique(np.array(list_of_predicted_classes) == y_data, return_counts=True)
@@ -543,11 +561,15 @@ class Optimiser:
 
                 elif "val" in  type_of_data.lower():
 
-                    wandb.log({'val_accuracy': accuracy})
+                     wandb.log({'val_accuracy': accuracy,'val_loss':loss})
 
         if print_stats:
             
             print(f"{type_of_data} Accuracy : {accuracy}%  Avg. Loss : {loss}")
+
+        if return_confusion_matrix:
+
+            return confusion_matrix(y_data,list_of_predicted_classes)
 
         if return_stats:
             return accuracy,loss
@@ -598,7 +620,7 @@ class Optimiser:
 
                 a,h,y_pred_probs = nn.forward(x_train[i].flatten()) ## apply forward pass on input
                 
-                dw_cur,db_cur = nn.backprop(a,h,y_true,y_pred_probs) ## backprop now
+                dw_cur,db_cur = nn.backprop(a,h,y_true,y_pred_probs,loss=loss_type) ## backprop now
                 
 
                 dw_cur.reverse() ##dw returned by backprop are from last layer to first layer weights, hence reversing
@@ -678,7 +700,7 @@ class Optimiser:
 
                 a,h,y_pred_probs = nn.forward(x_train[i].flatten()) ## apply forward pass on input
                 
-                dw_cur,db_cur = nn.backprop(a,h,y_true,y_pred_probs) ## backprop now
+                dw_cur,db_cur = nn.backprop(a,h,y_true,y_pred_probs,loss=loss_type) ## backprop now
                 
 
                 dw_cur.reverse() ##dw returned by backprop are from last layer to first layer weights, hence reversing
@@ -770,7 +792,7 @@ class Optimiser:
                 
                 a,h,y_pred_probs = nn.forward(x_train[i].flatten(),weights=look_ahead_weights,biases=look_ahead_biases) ## apply forward pass on input
                 
-                dw_cur,db_cur = nn.backprop(a,h,y_true,y_pred_probs,weights=look_ahead_weights,biases=look_ahead_biases) ## backprop now
+                dw_cur,db_cur = nn.backprop(a,h,y_true,y_pred_probs,weights=look_ahead_weights,biases=look_ahead_biases,loss=loss_type) ## backprop now
                 
 
                 dw_cur.reverse() ##dw returned by backprop are from last layer to first layer weights, hence reversing
@@ -863,7 +885,7 @@ class Optimiser:
 
                 a,h,y_pred_probs = nn.forward(x_train[i].flatten()) ## apply forward pass on input
                 
-                dw_cur,db_cur = nn.backprop(a,h,y_true,y_pred_probs) ## backprop now
+                dw_cur,db_cur = nn.backprop(a,h,y_true,y_pred_probs,loss=loss_type) ## backprop now
                 
 
                 dw_cur.reverse() ##dw returned by backprop are from last layer to first layer weights, hence reversing
@@ -977,7 +999,7 @@ class Optimiser:
 
                 a,h,y_pred_probs = nn.forward(x_train[i].flatten()) ## apply forward pass on input
                 
-                dw_cur,db_cur = nn.backprop(a,h,y_true,y_pred_probs) ## backprop now
+                dw_cur,db_cur = nn.backprop(a,h,y_true,y_pred_probs,loss=loss_type) ## backprop now
                 
 
                 dw_cur.reverse() ##dw returned by backprop are from last layer to first layer weights, hence reversing
@@ -1102,7 +1124,7 @@ class Optimiser:
 
                 a,h,y_pred_probs = nn.forward(x_train[i].flatten()) ## apply forward pass on input
                 
-                dw_cur,db_cur = nn.backprop(a,h,y_true,y_pred_probs) ## backprop now
+                dw_cur,db_cur = nn.backprop(a,h,y_true,y_pred_probs,loss=loss_type) ## backprop now
                 
 
                 dw_cur.reverse() ##dw returned by backprop are from last layer to first layer weights, hence reversing
@@ -1164,7 +1186,7 @@ class Optimiser:
                 self.compute_accuracy(nn,train_data,print_stats=True,type_of_data="Training  ",epoch=epoch,loss_type=loss_type,log_wandb_data=log_wandb_data)
                 self.compute_accuracy(nn,val_data,print_stats=True,type_of_data="Validation",epoch=epoch,loss_type=loss_type,log_wandb_data=log_wandb_data)
 
-    def train(self,nn,train_data,val_data,optimiser,lr=1e-3,epochs=5,batch_size=1,l2_param=0,print_val_accuracy=True,loss_type="cross entropy",log_wandb_data=False):
+    def train(self,nn,train_data,val_data,optimiser,optimiser_params_dict,lr=1e-3,epochs=5,batch_size=1,l2_param=0,print_val_accuracy=True,loss_type="cross entropy",log_wandb_data=False):
 
         """
         Method to unify accesses to all the optimisers under one name. This was required to support wandb setup to perform hyperparameter tuning.
@@ -1175,7 +1197,15 @@ class Optimiser:
 
         Params:
 
-        nn : An object corresponding to an initalized or ready neural network
+            nn : An object corresponding to an initalized or ready neural network
+
+            train_data: [x_train,y_train] the data used for training.
+
+            val_data: [x_val,y_val] the data used for validation.
+
+            optimiser: "sgd","momentum","nag","adam","rmsprop","nadam".
+
+            optimiser_params_dict : A dictionary of paramerters used for optimisers.
 
             lr : learning rate parameter (default  :1e-3)
 
@@ -1193,30 +1223,264 @@ class Optimiser:
 
             None.
         
+        
         """
         
+        if loss_type=="cross_entropy": ## just remapping parsed arg value to interally used value
+
+            loss = "cross entropy"
+
+        elif loss_type == "mean_squared_error":
+
+            loss = "squared error"
+            
         if optimiser == "sgd":
 
-            self.sgd(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,log_wandb_data=log_wandb_data)
+            self.sgd(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss,log_wandb_data=log_wandb_data)
 
-        elif optimiser == "gd_momentum":
+        elif optimiser == "momentum":
 
-            self.gd_momentum(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,momentum=0.9,log_wandb_data=log_wandb_data)
+            self.gd_momentum(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss,momentum=optimiser_params_dict["momentum"],log_wandb_data=log_wandb_data)
         
-        elif optimiser == "gd_nesterov":
+        elif optimiser == "nag":
 
-            self.gd_nesterov(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,momentum=0.9,log_wandb_data=log_wandb_data)
+            self.gd_nesterov(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss,momentum=optimiser_params_dict["momentum"],log_wandb_data=log_wandb_data)
             
         elif optimiser == "rmsprop":
 
-            self.rmsprop(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,beta=0.5,epsilon=1e-4,log_wandb_data=log_wandb_data)
+            self.rmsprop(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss,beta=optimiser_params_dict["beta"],epsilon=optimiser_params_dict["epsilon"],log_wandb_data=log_wandb_data)
             
         elif optimiser == "adam":
 
-            self.adam(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,beta1=0.9,beta2=0.999,epsilon=1e-8,log_wandb_data=log_wandb_data)
+            self.adam(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss,beta1=optimiser_params_dict["beta1"],beta2=optimiser_params_dict["beta2"],epsilon=optimiser_params_dict["epsilon"],log_wandb_data=log_wandb_data)
         
         elif optimiser == "nadam":
 
-            self.nadam(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss_type,beta1=0.9,beta2=0.999,epsilon=1e-8,log_wandb_data=log_wandb_data)
-            
+            self.nadam(nn,train_data,val_data,lr,epochs,batch_size,l2_param,print_val_accuracy,loss,beta1=optimiser_params_dict["beta1"],beta2=optimiser_params_dict["beta2"],epsilon=optimiser_params_dict["epsilon"],log_wandb_data=log_wandb_data)
+                        
 
+
+## Visualizing confusion Matrix as a Directed Graph.
+
+def plot_graph_confusion_matrix(class_labels,confusion_mat,wandb_log=False):
+    """
+    Method to PLot confusion matrix as a directed graph, where nodes are the classes and edges are weighted by number of misclassifications.
+
+    i.e and edge from Class 0 to Class 2 with weight n means n data points of class 0 were misclassified as class 2.
+
+    Params:
+        class_labels : The list labels corresponding to each class
+        confusion_mat :  The confusion matrix returned by Optimiser.compute_accuracy method.
+    
+    """
+    
+    G = nx.DiGraph()  ## using the networkx library to create the graph.
+
+    G.add_nodes_from(class_labels) ## create a node in the graph corresponding to each class
+
+    """
+    Look at each ordered pair of classes and add an edge corrensponding to misclassification
+
+    A self loop is also added, but its not a misclassification.
+    """
+    
+    for i in range(len(class_labels)):
+        for j in range(len(class_labels)):
+            if confusion_mat[i, j] > 0:
+                G.add_edge(class_labels[i], class_labels[j], weight=confusion_mat[i, j])
+
+    
+    positioning = nx.shell_layout(G) ## arrange the nodes like a shell
+
+    
+    nx.draw_networkx_nodes(G, positioning, node_size=300, node_color='lightgreen',node_shape='8') ## PLot the nodes in the shell layout
+    nx.draw_networkx_labels(G, positioning)
+
+    
+    edge_weights = {(u, v): str(w['weight']) for u, v, w in G.edges(data=True)} ## Now plot the directed edges between the nodes in the shell layout 
+    nx.draw_networkx_edges(G, positioning,alpha=0.9,arrows=True,style=":",arrowsize=15,edge_cmap="viridis",edge_color="darkorchid")
+    nx.draw_networkx_edge_labels(G, positioning, edge_labels=edge_weights,label_pos=0.5)
+
+    if not wandb_log:
+        plt.title('Confusion Matrix As a DiGraph')
+
+    if wandb_log:
+        wandb.init(project="JV_CS23M036_TEJASVI_DL_ASSIGNMENT1", name="Confusion-Matrix-Graph-viz")
+        wandb.log({"CM as a Graph": [wandb.Image(plt, caption="")]})
+    
+    plt.show()
+    plt.close()
+
+
+## Visualizing confusion Matrix as a Directed Graph.
+
+def plot_heatmap_confusion_matrix(confusion_mat,wandb_log=False):
+    """
+    Method to Plot confusion matrix in the standard form.
+
+    Params:
+        class_labels : The list labels corresponding to each class
+        confusion_mat :  The confusion matrix returned by Optimiser.compute_accuracy method.
+    
+    """
+
+    #sb.heatmap(confusion_mat,annot=[[class_labels for i in range(len(class_labels))]])
+
+    plt.figure(figsize=(8,8))
+    if not wandb_log:
+        plt.title("HeatMap of Confusion Matrix of Test Data")
+    plt.xticks([i for i in range(10)])
+    plt.xlabel("Predicted Class Id")
+    plt.yticks([i for i in range(10)])
+    plt.ylabel("True Class Id")
+    plt.imshow(confusion_mat, cmap='RdPu')
+    if wandb_log:
+        wandb.init(project="JV_CS23M036_TEJASVI_DL_ASSIGNMENT1", name="Confusion-Matrix-HeatMap-viz")
+        wandb.log({"CM as a Heatmap": [wandb.Image(plt, caption="")]})
+    
+    plt.close()
+
+
+if __name__ == '__main__': ## run the following lines only if this code is explicitly invoked, rather than just imported, may be by WandBSweep.py module
+    """
+    Provide support for some important arguments
+    """
+
+
+    parser = argparse.ArgumentParser()
+
+
+    parser.add_argument("-wp", "--wandb_project", type=str, default=None, help="Project name used to track experiments in Weights & Biases dashboard.")
+
+    parser.add_argument("-we", "--wandb_entity", type=str, default=None, help="Wandb Entity used to track experiments in the Weights & Biases dashboard.")
+
+    parser.add_argument("-d", "--dataset", type=str, default="fashion_mnist",choices=["mnist","fashion_mnist"], help="Dataset to be used.")
+
+    parser.add_argument("-e", "--epochs", type=int, default=25,help="Number of epochs to train neural network.")
+
+    parser.add_argument("-b", "--batch_size", type=int, default=32,help="Batch size used to train neural network.")
+
+    parser.add_argument("-l", "--loss", type=str, default="cross_entropy",choices=["mean_squared_error", "cross_entropy"],help="Choice of loss function.")
+
+    parser.add_argument("-o", "--optimizer", type=str, default="nadam",choices=["sgd", "momentum", "nag", "rmsprop", "adam", "nadam"],help="Optimizer used to minimize the loss.")
+
+    parser.add_argument("-lr", "--learning_rate", type=float, default=1e-4,help="Learning rate used to optimize model parameters.")
+
+    parser.add_argument("-m", "--momentum", type=float, default=0.9,help="Momentum used by momentum and nag optimizers.")
+
+    parser.add_argument("-beta", "--beta", type=float, default=0.5,help="Beta used by rmsprop optimizer.")
+
+    parser.add_argument("-beta1", "--beta1", type=float, default=0.9,help="Beta1 used by adam and nadam optimizers.")
+
+    parser.add_argument("-beta2", "--beta2", type=float, default=0.999,help="Beta2 used by adam and nadam optimizers.")
+
+    parser.add_argument("-eps", "--epsilon", type=float, default=1e-8,help="Epsilon used by rmsprop/adam/nadam optimizers.")
+
+    parser.add_argument("-w_d", "--weight_decay", type=float, default=.0,help="Weight decay used by optimizers.")
+
+    parser.add_argument("-w_i", "--weight_init", type=str, default="xavier",choices=["random","xavier"],help="Weight decay used by optimizers.")
+
+    parser.add_argument("-nhl", "--num_layers", type=int, default=4,help="Number of hidden layers used in feedforward neural network.")
+
+    parser.add_argument("-sz", "--hidden_size", type=int, default=64,help="Number of hidden neurons in a feedforward layer.")
+
+    parser.add_argument("-a", "--activation", type=str, default="tanh",choices=["identity", "sigmoid", "tanh", "ReLu"],help="Activation function to be used in the neural network.")
+
+
+    args = parser.parse_args()
+
+    print("This is the configuration:\n")
+
+    print(f"WandB Project : {args.wandb_project}")
+    print(f"WandB Entity : {args.wandb_entity}")
+    print(f"Dataset : {args.dataset}")
+    print(f"Num of Hidden Layers : {args.num_layers}")
+    print(f"Hidden Layer Size : {args.hidden_size}")
+    print(f"initialization : {args.weight_init}")
+    print(f"Loss : {args.loss}")
+    print(f"Optimizer : {args.optimizer}")
+    print(f"Batch Size : {args.batch_size}")
+    print(f"Epochs : {args.epochs}")
+    print(f"Weight decay:{args.weight_decay}\n")
+
+    """
+    ************ Only when WandB project or entity is specified, wandb logging would happen ************
+    """
+
+    if not args.wandb_project and not args.wandb_entity:
+        log_wandb_data = False
+    else:
+        log_wandb_data = True
+
+
+    if log_wandb_data:
+
+        run = wandb.init(project=args.wandb_project,entity=args.wandb_entity)
+
+    optimiser_params_dict = {"momentum":args.momentum,"beta":args.beta,"beta1":args.beta1,"beta2":args.beta2,"epsilon":args.epsilon}
+
+    print("Optimiser Params:")
+    for i in optimiser_params_dict.keys():
+        print(f"{i} : {optimiser_params_dict[i]}")
+
+
+    print("\n")
+
+    """
+    Read the dataset
+    """
+
+    """unpacking data returned by load_data(), as specified in keras docs"""
+    if args.dataset == "fashion_mnist":
+        (x_train,y_train),(x_test,y_test) = fashion_mnist.load_data()
+
+    elif args.dataset == "mnist":
+        (x_train,y_train),(x_test,y_test) = mnist.load_data()
+
+
+    """flatten the data and perform random train-validation split."""
+
+    ## train-test data is got from the mnist fashion import data call
+    ## now this data is being flattened, i.e each image into a 1d array
+    ## then flattened train data is split into 80% train and 20% validation data.
+
+
+    seed = 76 #setting this as seed wherever randomness comes
+
+    x_train_flattened = x_train.flatten().reshape(x_train.shape[0],-1)/255
+    x_test_flattened = x_test.flatten().reshape(x_test.shape[0],-1)/255
+
+
+    #np.random.seed(seed)
+    random_num_generator = np.random.RandomState(seed)
+
+
+    validation_indices = random_num_generator.choice(x_train_flattened.shape[0],int(0.1*x_train_flattened.shape[0]),replace=False)
+    train_indices = np.array(list(set(np.arange(x_train_flattened.shape[0])).difference(set(validation_indices))))
+
+    x_train_data = x_train_flattened[train_indices]
+    y_train_data = y_train[train_indices]
+
+    x_validation_data = x_train_flattened[validation_indices]
+    y_validation_data = y_train[validation_indices]
+
+
+
+    ## create a neural network as specified
+    nn = NeuralNetwork(seed=seed)
+    nn.createNNet(number_of_hidden_layers=args.num_layers,neurons_per_hidden_layer=[args.hidden_size]*args.num_layers,initialization = args.weight_init,activation=args.activation)
+
+
+    ## create an optimiser instance and start training
+    optim = Optimiser()
+    optim.train(nn,[x_train_data,y_train_data],[x_validation_data,y_validation_data],args.optimizer,optimiser_params_dict,lr=args.learning_rate,epochs=args.epochs,batch_size=args.batch_size,l2_param=args.weight_decay,print_val_accuracy=True,loss_type=args.loss,log_wandb_data=log_wandb_data)
+
+
+    ## Compute the test accuracy
+    print("\n============= Test Accuracy =============")
+    confusion_mat = optim.compute_accuracy(nn,[x_test_flattened,y_test],print_stats=True,type_of_data="Test",loss_type="cross entropy",return_confusion_matrix=True)
+
+    ## Plot confusion matrices
+    class_labels = [str(i) for i in range(10)]
+    plot_graph_confusion_matrix(class_labels,confusion_mat,wandb_log=log_wandb_data)
+    plot_heatmap_confusion_matrix(confusion_mat,wandb_log=log_wandb_data)
