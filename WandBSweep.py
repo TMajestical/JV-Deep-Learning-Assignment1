@@ -63,8 +63,7 @@ sweep_config = {
     }
 }
 
-#sweep_id = wandb.sweep(sweep=sweep_config, project='JV_CS23M036_TEJASVI_DL_ASSIGNMENT1')
-sweep_id = wandb.sweep(sweep=sweep_config, project='tmp')
+sweep_id = wandb.sweep(sweep=sweep_config, project='JV_CS23M036_TEJASVI_DL_ASSIGNMENT1')
 
 
 ## Data Split and Normalisation
