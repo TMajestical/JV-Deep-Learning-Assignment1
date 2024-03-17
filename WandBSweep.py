@@ -9,7 +9,7 @@ import wandb
 from sklearn.metrics import confusion_matrix
 
 #"""WandB API Key Masked"""
-wandb.login(key="38853ce9d1432bd40bf80d2d27657183fc335aeb")
+wandb.login(key="")
 
 # Creating a wandb sweep config
 
